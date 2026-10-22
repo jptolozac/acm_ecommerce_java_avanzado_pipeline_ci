@@ -84,7 +84,7 @@ jobs:
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
       - name: Run Trivy analysis
-        if: ${{ !env.ACT && github.event_name == 'push' }}
+        if: ${{ !env.ACT }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: acm_ecommerce_java_avanzado:${{ github.sha }}
