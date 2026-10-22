@@ -13,6 +13,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     runs-on: ubuntu-latest
     steps:
@@ -56,6 +57,13 @@ jobs:
         run: |
           docker compose -f docker-compose.yaml up -d --wait database
 
+      - name: Initialize CodeQL
+        if: ${{ !env.ACT }}
+        uses: github/codeql-action/init@v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+
       - name: Build the application and run tests
         run: ./gradlew clean build --no-daemon
 
@@ -67,12 +75,43 @@ jobs:
           path: build/reports/tests/**
           retention-days: 7
 
-      - name: build docker image
+      - name: Perform CodeQL Analysis
+        if: ${{ !env.ACT }}
+        uses: github/codeql-action/analyze@v4
+
+      - name: Build docker image
         if: github.event_name == 'push'
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
-      - name: push docker image to GHCR
-        if: github.event_name == 'push'
+      # Esto solo funciona para pruebas locales con act
+      - name: Scan Docker image with Trivy using act
+        if: ${{ env.ACT && github.event_name == 'push' }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.70.0 image \
+            --format table \
+            --scanners vuln \
+            --vuln-type os,library \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            acm_ecommerce_java_avanzado:${{ github.sha }}
+
+      - name: Scan Docker image with Trivy
+        if: ${{ !env.ACT && github.event_name == 'push' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: acm_ecommerce_java_avanzado:${{ github.sha }}
+          scan-type: 'image'
+          scanners: 'vuln'
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'
+
+      - name: Push docker image to GHCR
+        if: ${{ github.event_name == 'push' && !env.ACT }}
         env:
           REGISTRY: ghcr.io
           IMAGE_NAME: ${{ github.repository }}
@@ -80,3 +119,25 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
           docker tag acm_ecommerce_java_avanzado:${{ github.sha }} $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
           docker push $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
+
+      - name: Stop PostgreSQL service
+        if: always()
+        run: docker compose -f docker-compose.yaml down
+
+  compilation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+          cache: "gradle"
+
+      - name: Analize code with Sonarqube
+        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
