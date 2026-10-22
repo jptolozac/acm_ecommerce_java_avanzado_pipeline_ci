@@ -10,32 +10,40 @@ on:
 
 jobs:
   build:
+    permissions:
+      contents: read
+      packages: write
+
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK 25 (Temurin)
+      - name: Set up JDK 21 (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: "temurin"
-          java-version: "25"
+          java-version: "21"
           cache: "gradle"
 
       - name: Grant execute permission for Gradle wrapper
         run: chmod +x ./gradlew
 
       - name: Verify secrets
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
         run: |
-          if [ -z "${{ secrets.DB_USER }}" ]; then
+          if [ -z "$DB_USER" ]; then
             echo "Error: DB_USER secret is not set."
             exit 1
           fi
-          if [ -z "${{ secrets.DB_PASSWORD }}" ]; then
+          if [ -z "$DB_PASSWORD" ]; then
             echo "Error: DB_PASSWORD secret is not set."
             exit 1
           fi
-          if [ -z "${{ secrets.DB_NAME }}" ]; then
+          if [ -z "$DB_NAME" ]; then
             echo "Error: DB_NAME secret is not set."
             exit 1
           fi
@@ -49,10 +57,6 @@ jobs:
           docker compose -f docker-compose.yaml up -d --wait database
 
       - name: Build the application and run tests
-        env:
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_NAME: ${{ secrets.DB_NAME }}
         run: ./gradlew clean build --no-daemon
 
       - name: upload test results
@@ -67,7 +71,7 @@ jobs:
         if: github.event_name == 'push'
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
-      - name: push docker image to Docker Hub
+      - name: push docker image to GHCR
         if: github.event_name == 'push'
         env:
           REGISTRY: ghcr.io
