@@ -7,12 +7,12 @@ on:
   push:
     branches:
       - main
+      - feature/ci-pipeline-complement
 
 jobs:
   build:
     permissions:
       contents: read
-      packages: write
       security-events: write
 
     runs-on: ubuntu-latest
@@ -54,8 +54,7 @@ jobs:
           DB_USER: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
           DB_NAME: ${{ secrets.DB_NAME }}
-        run: |
-          docker compose -f docker-compose.yaml up -d --wait database
+        run: docker compose -f docker-compose.yaml up -d --wait database
 
       - name: Initialize CodeQL
         if: ${{ !env.ACT }}
@@ -67,7 +66,16 @@ jobs:
       - name: Build the application and run tests
         run: ./gradlew clean build --no-daemon
 
-      - name: upload test results
+      - name: Upload application JAR
+        if: ${{ github.event_name == 'push' && !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: application-jar
+          path: build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload test results
         if: ${{ !env.ACT }}
         uses: actions/upload-artifact@v4
         with:
@@ -79,13 +87,56 @@ jobs:
         if: ${{ !env.ACT }}
         uses: github/codeql-action/analyze@v4
 
+      - name: Stop PostgreSQL service
+        if: always()
+        run: docker compose -f docker-compose.yaml down
+
+  container-security:
+    name: Container security (Trivy)
+    needs: build
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download application JAR
+        if: ${{ !env.ACT }}
+        uses: actions/download-artifact@v4
+        with:
+          name: application-jar
+          path: build/libs
+
+      # Solo para probar localmente con act, ya que no descargamos el artefacto.
+      #-----------------------------------------
+      - name: Set up JDK 21 for act
+        if: ${{ env.ACT }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+          cache: "gradle"
+
+      - name: Grant execute permission for Gradle wrapper
+        if: ${{ env.ACT }}
+        run: chmod +x ./gradlew
+
+      - name: Build JAR for act
+        if: ${{ env.ACT }}
+        run: ./gradlew clean assemble --no-daemon
+      #-----------------------------------------
+
       - name: Build docker image
-        if: github.event_name == 'push'
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
-      # Esto solo funciona para pruebas locales con act
+      # Escaneo local con act
       - name: Scan Docker image with Trivy using act
-        if: ${{ env.ACT && github.event_name == 'push' }}
+        if: ${{ env.ACT }}
         run: |
           docker run --rm \
             -v /var/run/docker.sock:/var/run/docker.sock \
@@ -98,15 +149,16 @@ jobs:
             --exit-code 1 \
             acm_ecommerce_java_avanzado:${{ github.sha }}
 
+      # Escaneo en GitHub Actions
       - name: Scan Docker image with Trivy
-        if: ${{ !env.ACT && github.event_name == 'push' }}
+        if: ${{ !env.ACT }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: acm_ecommerce_java_avanzado:${{ github.sha }}
-          scan-type: 'image'
-          scanners: 'vuln'
-          vuln-type: 'os,library'
-          severity: 'HIGH,CRITICAL'
+          scan-type: image
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: '1'
 
@@ -116,15 +168,11 @@ jobs:
           REGISTRY: ghcr.io
           IMAGE_NAME: ${{ github.repository }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
-          docker tag acm_ecommerce_java_avanzado:${{ github.sha }} $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
-          docker push $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          docker tag acm_ecommerce_java_avanzado:${{ github.sha }} "$REGISTRY/${IMAGE_NAME}:${{ github.sha }}"
+          docker push "$REGISTRY/${IMAGE_NAME}:${{ github.sha }}"
 
-      - name: Stop PostgreSQL service
-        if: always()
-        run: docker compose -f docker-compose.yaml down
-
-  compilation:
+  sonar-analysis:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
