@@ -67,11 +67,11 @@ jobs:
           path: build/reports/tests/**
           retention-days: 7
 
-      - name: build docker image
+      - name: Build docker image
         if: github.event_name == 'push'
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
-      - name: push docker image to GHCR
+      - name: Push docker image to GHCR
         if: github.event_name == 'push'
         env:
           REGISTRY: ghcr.io
@@ -80,3 +80,7 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
           docker tag acm_ecommerce_java_avanzado:${{ github.sha }} $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
           docker push $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
+
+      - name: Stop PostgreSQL service
+        if: always()
+        run: docker compose -f docker-compose.yaml down
