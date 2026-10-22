@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - feature/ci-pipeline-complement
 
 jobs:
   build:
@@ -83,15 +84,17 @@ jobs:
         if: github.event_name == 'push'
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
-      - name: Run Trivy analysis
-        if: ${{ !env.ACT }}
+      - name: Scan Docker image with Trivy
+        if: github.event_name == 'push'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: acm_ecommerce_java_avanzado:${{ github.sha }}
-          format: "table"
-          exit-code: "1"
+          scan-type: 'image'
+          scanners: 'vuln'
+          vuln-type: 'os,library'
+          severity: 'HIGH,CRITICAL'
           ignore-unfixed: true
-          vuln-type: "os,library"
+          exit-code: '1'
 
       - name: Push docker image to GHCR
         if: ${{ github.event_name == 'push' && !env.ACT }}
