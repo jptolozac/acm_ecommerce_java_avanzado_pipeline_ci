@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - main
-      - feature/ci-pipeline-complement
 
 jobs:
   build:
@@ -84,8 +83,23 @@ jobs:
         if: github.event_name == 'push'
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
+      # Esto solo funciona para pruebas locales con act
+      - name: Scan Docker image with Trivy using act
+        if: ${{ env.ACT && github.event_name == 'push' }}
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.70.0 image \
+            --format table \
+            --scanners vuln \
+            --vuln-type os,library \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            acm_ecommerce_java_avanzado:${{ github.sha }}
+
       - name: Scan Docker image with Trivy
-        if: github.event_name == 'push'
+        if: ${{ !env.ACT && github.event_name == 'push' }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: acm_ecommerce_java_avanzado:${{ github.sha }}
