@@ -41,10 +41,18 @@ jobs:
           fi
 
       - name: Start PostgreSQL service
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
         run: |
           docker compose -f docker-compose.yaml up -d --wait database
 
       - name: Build the application and run tests
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
         run: ./gradlew clean build --no-daemon
 
       - name: upload test results
