@@ -67,10 +67,6 @@ jobs:
       - name: Build the application and run tests
         run: ./gradlew clean build --no-daemon
 
-      - name: Perform CodeQL Analysis
-        if: ${{ !env.ACT }}
-        uses: github/codeql-action/analyze@v4
-
       - name: upload test results
         if: ${{ !env.ACT }}
         uses: actions/upload-artifact@v4
@@ -79,12 +75,26 @@ jobs:
           path: build/reports/tests/**
           retention-days: 7
 
+      - name: Perform CodeQL Analysis
+        if: ${{ !env.ACT }}
+        uses: github/codeql-action/analyze@v4
+
       - name: Build docker image
         if: github.event_name == 'push'
         run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
 
+      - name: Run Trivy analysis
+        if: ${{ !env.ACT && github.event_name == 'push' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: acm_ecommerce_java_avanzado:${{ github.sha }}
+          format: "table"
+          exit-code: "1"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+
       - name: Push docker image to GHCR
-        if: github.event_name == 'push'
+        if: ${{ github.event_name == 'push' && !env.ACT }}
         env:
           REGISTRY: ghcr.io
           IMAGE_NAME: ${{ github.repository }}
@@ -97,7 +107,6 @@ jobs:
         if: always()
         run: docker compose -f docker-compose.yaml down
 
-  
   compilation:
     runs-on: ubuntu-latest
     steps:
