@@ -1,0 +1,82 @@
+name: Build App
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    permissions:
+      contents: read
+      packages: write
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+          cache: "gradle"
+
+      - name: Grant execute permission for Gradle wrapper
+        run: chmod +x ./gradlew
+
+      - name: Verify secrets
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: |
+          if [ -z "$DB_USER" ]; then
+            echo "Error: DB_USER secret is not set."
+            exit 1
+          fi
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "Error: DB_PASSWORD secret is not set."
+            exit 1
+          fi
+          if [ -z "$DB_NAME" ]; then
+            echo "Error: DB_NAME secret is not set."
+            exit 1
+          fi
+
+      - name: Start PostgreSQL service
+        env:
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: |
+          docker compose -f docker-compose.yaml up -d --wait database
+
+      - name: Build the application and run tests
+        run: ./gradlew clean build --no-daemon
+
+      - name: upload test results
+        if: ${{ !env.ACT }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/reports/tests/**
+          retention-days: 7
+
+      - name: build docker image
+        if: github.event_name == 'push'
+        run: docker build -t acm_ecommerce_java_avanzado:${{ github.sha }} .
+
+      - name: push docker image to GHCR
+        if: github.event_name == 'push'
+        env:
+          REGISTRY: ghcr.io
+          IMAGE_NAME: ${{ github.repository }}
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login $REGISTRY -u ${{ github.actor }} --password-stdin
+          docker tag acm_ecommerce_java_avanzado:${{ github.sha }} $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
+          docker push $REGISTRY/${IMAGE_NAME}:${{ github.sha }}
